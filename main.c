@@ -142,8 +142,8 @@ void Stft_deNoise(char *in_file, char *out_file) {
     kiss_fft_scalar *inBuffer = wavRead_scalar(in_file, &sampleRate, &inSampleCount);
  
     if (inBuffer != nullptr) {
-        int32_t time_win = 30;
-        float sigma_noise = 0.1f;
+        int32_t time_win = 50;
+        float sigma_noise =0.047f;
         double startTime = now();
         DenoiseProc(inBuffer, sampleRate, inSampleCount, time_win, sigma_noise);
         double time_interval = calcElapsed(startTime, now());
