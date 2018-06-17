@@ -26,12 +26,12 @@
 #endif
 
 //写wav文件
-void wavWrite_scalar(char *filename, kiss_fft_scalar *buffer, size_t sampleRate, size_t totalSampleCount) {
-    drwav_data_format format = {};
+void wavWrite_scalar(char *filename, float *buffer, size_t sampleRate, size_t totalSampleCount) {
+    drwav_data_format format ;
     format.container = drwav_container_riff;     // <-- drwav_container_riff = normal WAV files, drwav_container_w64 = Sony Wave64.
     format.channels = 1;
     format.sampleRate = (drwav_uint32) sampleRate;
-    format.bitsPerSample = sizeof(kiss_fft_scalar) * 8;
+    format.bitsPerSample = sizeof(float) * 8;
     format.format = DR_WAVE_FORMAT_IEEE_FLOAT;
 
     drwav *pWav = drwav_open_file_write(filename, &format);
@@ -46,9 +46,9 @@ void wavWrite_scalar(char *filename, kiss_fft_scalar *buffer, size_t sampleRate,
 }
 
 //读取wav文件
-kiss_fft_scalar *wavRead_scalar(char *filename, uint32_t *sampleRate, uint64_t *totalSampleCount) {
+float *wavRead_scalar(char *filename, uint32_t *sampleRate, uint64_t *totalSampleCount) {
     unsigned int channels;
-    kiss_fft_scalar *buffer = drwav_open_and_read_file_f32(filename, &channels, sampleRate,
+    float *buffer = drwav_open_and_read_file_f32(filename, &channels, sampleRate,
                                                            totalSampleCount);
     if (buffer == nullptr) {
         printf("读取wav文件失败.");
@@ -103,7 +103,7 @@ void splitpath(const char *path, char *drv, char *dir, char *name, char *ext) {
     }
 }
 
-int DenoiseProc(kiss_fft_scalar *buffer, int sampleRate, size_t SampleCount, int32_t time_win, float sigma_noise) {
+int DenoiseProc(float *buffer, int sampleRate, size_t SampleCount, int32_t time_win, float sigma_noise) {
     int32_t ret = -1;
     stftDenoiseHandle *denoise_handle = NULL;
     denoise_handle = stftDenoise_init(time_win, sampleRate, &ret, sigma_noise);
@@ -114,10 +114,10 @@ int DenoiseProc(kiss_fft_scalar *buffer, int sampleRate, size_t SampleCount, int
     int32_t samples = stftDenoise_samples_per_time(denoise_handle);
     int32_t outbuf_len = stftDenoise_max_output(denoise_handle);
 
-    kiss_fft_scalar *input = buffer;
-    kiss_fft_scalar *output = buffer;
+    float *input = buffer;
+    float *output = buffer;
     size_t nTotal = SampleCount / samples;
-    int i = 0;
+	size_t i = 0;
     for (i = 0; i < nTotal; i++) {
         ret = stftDenoise_denoise_scalar(denoise_handle, input, samples);
         if (ret == ERROR_PARAMS) {
@@ -139,7 +139,7 @@ int DenoiseProc(kiss_fft_scalar *buffer, int sampleRate, size_t SampleCount, int
 void Stft_deNoise(char *in_file, char *out_file) {
     uint32_t sampleRate = 0; 
     uint64_t inSampleCount = 0;
-    kiss_fft_scalar *inBuffer = wavRead_scalar(in_file, &sampleRate, &inSampleCount);
+    float *inBuffer = wavRead_scalar(in_file, &sampleRate, &inSampleCount);
  
     if (inBuffer != nullptr) {
         int32_t time_win = 50;
@@ -154,7 +154,7 @@ void Stft_deNoise(char *in_file, char *out_file) {
 }
 
 int main(int argc, char *argv[]) {
-    printf("STFT deNoise\n");
+    printf("Audio Denoise by Time-Frequency Block Thresholding\n");
     printf("blog:http://cpuimage.cnblogs.com/\n");
     if (argc < 2)
         return -1;

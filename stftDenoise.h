@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include "kiss_fftr.h"
+#include "fft.h"
 
 #define OK                 0x00
 #define ERROR_MEMORY       0x01
@@ -27,27 +27,26 @@ typedef struct StftDenoiseHandle {
 
     float sigma_noise;  // assumption the sigma of gaussian white noise
     float sigma_hanning_noise;
-    kiss_fft_scalar *inbuf;       // internal buffer for keep one window size input samples
-    kiss_fft_scalar *inbuf_win;
-    kiss_fft_scalar *outbuf;      // internal buffer for keep one macro block output samples
+    float *inbuf;       // internal buffer for keep one window size input samples
+    float *inbuf_win;
+    float *outbuf;      // internal buffer for keep one macro block output samples
 
-    kiss_fft_cpx **stft_coef;
-    kiss_fft_cpx **stft_thre;
-    kiss_fft_cpx **stft_coef_block;
-    kiss_fft_cpx **stft_coef_block_norm;
-    kiss_fftr_cfg forward_fftr_cfg;
-    kiss_fftr_cfg backward_fftr_cfg;
+    fft_complex **stft_coef;
+    fft_complex **stft_thre;
+    fft_complex **stft_coef_block;
+    fft_complex **stft_coef_block_norm;
+
 } stftDenoiseHandle;
 
 stftDenoiseHandle *stftDenoise_init(int32_t time_win, int32_t fs, int32_t *err, float sigma_noise);
 
 int32_t stftDenoise_reset(stftDenoiseHandle *handle);
 
-int32_t stftDenoise_denoise_scalar(stftDenoiseHandle *handle, kiss_fft_scalar *in, int32_t in_len);
+int32_t stftDenoise_denoise_scalar(stftDenoiseHandle *handle, float *in, int32_t in_len);
 
-int32_t stftDenoise_output_scalar(stftDenoiseHandle *handle, kiss_fft_scalar *out, int32_t out_len);
+int32_t stftDenoise_output_scalar(stftDenoiseHandle *handle, float *out, int32_t out_len);
 
-int32_t stftDenoise_flush_scalar(stftDenoiseHandle *handle, kiss_fft_scalar *out, int32_t out_len);
+int32_t stftDenoise_flush_scalar(stftDenoiseHandle *handle, float *out, int32_t out_len);
 
 void stftDenoise_free(stftDenoiseHandle *handle);
 
