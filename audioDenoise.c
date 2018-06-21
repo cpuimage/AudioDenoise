@@ -1,4 +1,4 @@
-#include "stftDenoise.h"
+#include "audioDenoise.h"
 #include "fft.h"
 
 
@@ -46,15 +46,16 @@ int roundup_pow_of_two(int x) {
 	return r;
 }
 
-stftDenoiseHandle *stftDenoise_init(int32_t time_win, int32_t fs, int32_t *err, float sigma_noise) {
+audioDenoiseHandle *audioDenoise_init(int32_t time_win, int32_t fs, int32_t *err, float sigma_noise) {
     if (time_win <= 0 || fs <= 0) {
         *err = ERROR_PARAMS;
         return nullptr;
     }
     int isMemFailed = 0;
-    stftDenoiseHandle *handle = (stftDenoiseHandle *) malloc(sizeof(struct StftDenoiseHandle));
+    audioDenoiseHandle *handle = (audioDenoiseHandle *) malloc(sizeof(struct audioDenoiseHandle));
     if (handle == nullptr) return nullptr;
     // Compute hanning window
+    handle->fs =fs;
     handle->win_size = roundup_pow_of_two(fs / 1000 * time_win);
     handle->half_win_size = handle->win_size / 2;
     handle->win_hanning = (float *) malloc(sizeof(float) * (handle->win_size));
@@ -103,46 +104,46 @@ stftDenoiseHandle *stftDenoise_init(int32_t time_win, int32_t fs, int32_t *err, 
     }
     memset(handle->outbuf, 0, sizeof(float) * (handle->macro_size + handle->half_win_size));
 
-    handle->stft_coef = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-    if (!(handle->stft_coef)) {
+    handle->audio_coef = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->audio_coef)) {
         isMemFailed = 1;
     }
     for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-        handle->stft_coef[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
-        if (!(handle->stft_coef[i])) {
+        handle->audio_coef[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
+        if (!(handle->audio_coef[i])) {
             isMemFailed = 1;
             break;
         }
     }
-    handle->stft_thre = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-    if (!(handle->stft_thre)) {
+    handle->audio_thre = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->audio_thre)) {
         isMemFailed = 1;
     }
     for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-        handle->stft_thre[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
-        if (!(handle->stft_thre[i])) {
+        handle->audio_thre[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
+        if (!(handle->audio_thre[i])) {
             isMemFailed = 1;
             break;
         }
     }
-    handle->stft_coef_block = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-    if (!(handle->stft_coef_block)) {
+    handle->audio_coef_block = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->audio_coef_block)) {
         isMemFailed = 1;
     }
     for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-        handle->stft_coef_block[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
-        if (!(handle->stft_coef_block[i])) {
+        handle->audio_coef_block[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
+        if (!(handle->audio_coef_block[i])) {
             isMemFailed = 1;
             break;
         }
     }
-    handle->stft_coef_block_norm = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-    if (!(handle->stft_coef_block_norm)) {
+    handle->audio_coef_block_norm = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->audio_coef_block_norm)) {
         isMemFailed = 1;
     }
     for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-        handle->stft_coef_block_norm[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
-        if (!(handle->stft_coef_block_norm[i])) {
+        handle->audio_coef_block_norm[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
+        if (!(handle->audio_coef_block_norm[i])) {
             isMemFailed = 1;
             break;
         }
@@ -152,13 +153,13 @@ stftDenoiseHandle *stftDenoise_init(int32_t time_win, int32_t fs, int32_t *err, 
         return handle;
     }
 
-    stftDenoise_free(handle);
+    audioDenoise_free(handle);
     handle = nullptr;
     *err = ERROR_MEMORY;
     return handle;
 }
 
-int32_t stftDenoise_reset(stftDenoiseHandle *handle) {
+int32_t audioDenoise_reset(audioDenoiseHandle *handle) {
 	if (!handle) {
 		return ERROR_PARAMS;
 	}
@@ -173,18 +174,18 @@ int32_t stftDenoise_reset(stftDenoiseHandle *handle) {
 }
 
 
-static void stftDenoise_STFT(stftDenoiseHandle *handle) {
+static void audioDenoise_audio(audioDenoiseHandle *handle) {
 	//filter with window
 	for (int32_t i = 0; i < handle->win_size; i++) {
 		(handle->inbuf_win)[i] = (handle->inbuf)[i] * (handle->win_hanning)[i];
 	}
 	fft_plan forward_plan = fft_plan_dft_r2c_1d(handle->win_size, handle->inbuf_win,
-		handle->stft_coef[handle->have_nblk_time], 0);
+		handle->audio_coef[handle->have_nblk_time], 0);
 	fft_execute(forward_plan);
 	fft_destroy_plan(forward_plan);
 }
 
-static void stftDenoise_inverse_STFT(stftDenoiseHandle *handle) {
+static void audioDenoise_inverse_audio(audioDenoiseHandle *handle) {
 	int32_t half_win_size = handle->half_win_size;
 	memcpy(handle->outbuf,
 		handle->outbuf + handle->macro_size,
@@ -193,7 +194,7 @@ static void stftDenoise_inverse_STFT(stftDenoiseHandle *handle) {
 		sizeof(float) * (handle->macro_size));
 
 	for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-		fft_plan backward_plan = fft_plan_dft_c2r_1d(handle->win_size, handle->stft_coef[i], handle->inbuf_win, 0);
+		fft_plan backward_plan = fft_plan_dft_c2r_1d(handle->win_size, handle->audio_coef[i], handle->inbuf_win, 0);
 		fft_execute(backward_plan);
 		fft_destroy_plan(backward_plan);
 		float inv_winsize = 1.0f / (handle->win_size);
@@ -203,8 +204,8 @@ static void stftDenoise_inverse_STFT(stftDenoiseHandle *handle) {
 	}
 }
 
-// calculate the power of STFT in block [row_start:row_end, col_start:col_end]
-static float power_STFT(fft_complex **data,
+// calculate the power of audio in block [row_start:row_end, col_start:col_end]
+static float power_audio(fft_complex **data,
 	int32_t row_start, int32_t row_end,
 	int32_t col_start, int32_t col_end) {
 	float sum = 0;
@@ -221,8 +222,8 @@ static float power_STFT(fft_complex **data,
 	return sum;
 }
 
-// calculate the energy of STFT in real dimension
-static float energy_real_STFT(fft_complex **data,
+// calculate the energy of audio in real dimension
+static float energy_real_audio(fft_complex **data,
 	int32_t row_start, int32_t row_end,
 	int32_t col_start, int32_t col_end) {
 	float sum = 0;
@@ -250,7 +251,7 @@ static void scalar_multiply(fft_complex **dst_matrix, fft_complex **src_matrix,
 	}
 }
 
-static void stftDenoise_adaptive_block(stftDenoiseHandle *handle,
+static void audioDenoise_adaptive_block(audioDenoiseHandle *handle,
 	int32_t ith_half_macroblk_frq,
 	int32_t *seg_time, int32_t *seg_freq) {
 	float SURE_real = 0;
@@ -262,18 +263,18 @@ static void stftDenoise_adaptive_block(stftDenoiseHandle *handle,
 	int32_t TT, FF;
 	float norm = sqrtf(2.0f) / (sqrtf((float)handle->win_size) * (handle->sigma_hanning_noise));
 
-	//Get STFT coef macro block and block norm
+	//Get audio coef macro block and block norm
 	for (int32_t index_blk_time = 0; index_blk_time < handle->max_nblk_time; index_blk_time++) {
 		int32_t index_blk_freq = 1 + ith_half_macroblk_frq * (handle->max_nblk_freq);
 		for (int32_t i = 0; i < handle->max_nblk_freq; i++) {
-			(handle->stft_coef_block)[index_blk_time][i].real =
-				(handle->stft_coef)[index_blk_time][index_blk_freq + i].real;
-			(handle->stft_coef_block)[index_blk_time][i].imag =
-				(handle->stft_coef)[index_blk_time][index_blk_freq + i].imag;
-			(handle->stft_coef_block_norm)[index_blk_time][i].real =
-				(handle->stft_coef_block)[index_blk_time][i].real * norm;
-			(handle->stft_coef_block_norm)[index_blk_time][i].imag =
-				(handle->stft_coef_block)[index_blk_time][i].imag * norm;
+			(handle->audio_coef_block)[index_blk_time][i].real =
+				(handle->audio_coef)[index_blk_time][index_blk_freq + i].real;
+			(handle->audio_coef_block)[index_blk_time][i].imag =
+				(handle->audio_coef)[index_blk_time][index_blk_freq + i].imag;
+			(handle->audio_coef_block_norm)[index_blk_time][i].real =
+				(handle->audio_coef_block)[index_blk_time][i].real * norm;
+			(handle->audio_coef_block_norm)[index_blk_time][i].imag =
+				(handle->audio_coef_block)[index_blk_time][i].imag * norm;
 		}
 	}
 
@@ -288,7 +289,7 @@ static void stftDenoise_adaptive_block(stftDenoiseHandle *handle,
 			temp = (lambda * lambda) * (size_blk * size_blk) - 2 * lambda * size_blk * (size_blk - 2);
 			for (int32_t ii = 0; ii < fastPow(2, T); ii++) {
 				for (int32_t jj = 0; jj < fastPow(2, F); jj++) {
-					energy_real = energy_real_STFT(handle->stft_coef_block_norm,
+					energy_real = energy_real_audio(handle->audio_coef_block_norm,
 						TT * ii, TT * (ii + 1) - 1,
 						FF * jj, FF * (jj + 1) - 1);
 					SURE_real += size_blk + temp / energy_real * (energy_real > lambda * size_blk)
@@ -315,7 +316,7 @@ static void stftDenoise_adaptive_block(stftDenoiseHandle *handle,
 	}
 }
 
-static void stftDenoise_compute_thre(stftDenoiseHandle *handle,
+static void audioDenoise_compute_thre(audioDenoiseHandle *handle,
 	int32_t ith_half_macro_freq,
 	int32_t seg_time,
 	int32_t seg_freq) {
@@ -329,7 +330,7 @@ static void stftDenoise_compute_thre(stftDenoiseHandle *handle,
 		int32_t TT_ii = TT * ii;
 		for (int32_t jj = 0; jj < fastPow(2, seg_freq); jj++) {
 			int32_t FF_jj = FF * jj;
-			a = 1.0f - L_Weight / power_STFT(handle->stft_coef_block,
+			a = 1.0f - L_Weight / power_audio(handle->audio_coef_block,
 				TT_ii, TT_ii + TT - 1,
 				FF_jj, FF_jj + FF - 1);
 			a = a * (a > 0);
@@ -339,33 +340,41 @@ static void stftDenoise_compute_thre(stftDenoiseHandle *handle,
 				int32_t idx_row = TT_ii + kk;
 				for (int32_t ww = 0; ww < FF; ww++) {
 					int32_t idx_col = FF_jj + ww;
-					(handle->stft_thre)[idx_row][idx_base + idx_col].real =
-						(handle->stft_coef_block)[idx_row][idx_col].real * a;
-					(handle->stft_thre)[idx_row][idx_base + idx_col].imag =
-						(handle->stft_coef_block)[idx_row][idx_col].imag * a;
+					(handle->audio_thre)[idx_row][idx_base + idx_col].real =
+						(handle->audio_coef_block)[idx_row][idx_col].real * a;
+					(handle->audio_thre)[idx_row][idx_base + idx_col].imag =
+						(handle->audio_coef_block)[idx_row][idx_col].imag * a;
 				}
 			}
 		}
 	}
 }
 
-static void stftDenoise_wiener(stftDenoiseHandle *handle) {
+static void audioDenoise_wiener(audioDenoiseHandle *handle) {
 	float wiener = 0;
 	float sigma = handle->sigma_hanning_noise;
-	float w_sigma = (handle->win_size) * (sigma * sigma);
+    float low_f = 500.0;
+    int low_f_index = low_f / (handle->fs / handle->half_win_size);
+
+    float w_sigma = (handle->win_size) * (sigma * sigma);
 	for (int32_t t = 0; t < handle->max_nblk_time; t++) {
 		for (int32_t f = 0; f < (handle->win_size + 1) / 2; f++) {
-			float r = (handle->stft_thre)[t][f].real;
-			float i = (handle->stft_thre)[t][f].imag;
+			float r = (handle->audio_thre)[t][f].real;
+			float i = (handle->audio_thre)[t][f].imag;
 			wiener = (r * r) + (i * i);
 			wiener = wiener / (wiener + w_sigma);
-			handle->stft_coef[t][f].real *= wiener;
-			handle->stft_coef[t][f].imag *= wiener;
+			handle->audio_coef[t][f].real *= wiener;
+			handle->audio_coef[t][f].imag *= wiener;
+            // attenuate more below low_f Hz
+            if (f < low_f_index) {
+                handle->audio_coef[t][f].real *= 0.45f;
+                handle->audio_coef[t][f].imag *= 0.45f;
+            }
 		}
 	}
 }
 
-static void stftDenoise_core(stftDenoiseHandle *handle) {
+static void audioDenoise_core(audioDenoiseHandle *handle) {
 	float L_pi = 8.0;
 	float Lambda_pi = 2.5;
 	float a = 0;
@@ -377,21 +386,21 @@ static void stftDenoise_core(stftDenoiseHandle *handle) {
 
 	// DC part
 	//a = 1 - (Lambda_pi*L_pi*pow(handle->sigma_hanning_noise,2)*(handle->win_size)) 
-	//        / power_STFT(handle->stft_coef, 0, handle->max_nblk_time-1, 0, 0);
+	//        / power_audio(handle->audio_coef, 0, handle->max_nblk_time-1, 0, 0);
 	a = 1.0f - (Lambda_pi * L_pi * L_sigma)
-		/ power_STFT(handle->stft_coef, 0, handle->max_nblk_time - 1, 0, 0);
+		/ power_audio(handle->audio_coef, 0, handle->max_nblk_time - 1, 0, 0);
 	if (a < 0) {
 		a = 0;
 	}
-	scalar_multiply(handle->stft_thre, handle->stft_coef, 0, handle->max_nblk_time - 1, 0, 0, a);
+	scalar_multiply(handle->audio_thre, handle->audio_coef, 0, handle->max_nblk_time - 1, 0, 0, a);
 
 	// negative frequency part
 	for (int32_t i = 0; i < half_nb_macroblk_frq; i++) {
 		//adaptive block
-		stftDenoise_adaptive_block(handle, i, &seg_time, &seg_freq);
+		audioDenoise_adaptive_block(handle, i, &seg_time, &seg_freq);
 
 		//compute the attenuation map base on adaptive block segmentation
-		stftDenoise_compute_thre(handle, i, seg_time, seg_freq);
+		audioDenoise_compute_thre(handle, i, seg_time, seg_freq);
 	}
 
 	// for last few frequency that do not match 2D MarcroBlock
@@ -400,20 +409,20 @@ static void stftDenoise_core(stftDenoiseHandle *handle) {
 		for (int32_t i = idx_freq_last; i < (handle->win_size / 2 + 1); i++) {
 			//a = Lambda_pi*L_pi*pow(handle->sigma_hanning_noise, 2)*(handle->win_size);
 			a = Lambda_pi * L_pi * L_sigma;
-			a = 1 - a / power_STFT(handle->stft_coef, 0, handle->max_nblk_time - 1, i, i);
+			a = 1 - a / power_audio(handle->audio_coef, 0, handle->max_nblk_time - 1, i, i);
 			if (a < 0) {
 				a = 0;
 			}
-			scalar_multiply(handle->stft_thre, handle->stft_coef,
+			scalar_multiply(handle->audio_thre, handle->audio_coef,
 				0, handle->max_nblk_time - 1,
 				i, i, a);
 		}
 	}
 	// wiener filter
-	stftDenoise_wiener(handle);
+	audioDenoise_wiener(handle);
 }
 
-int32_t stftDenoise_denoise_scalar(stftDenoiseHandle *handle,
+int32_t audioDenoise_denoise_scalar(audioDenoiseHandle *handle,
 	float *in, int32_t in_len) {
 	if ((in_len != handle->half_win_size) || (!in)) {
 		return ERROR_PARAMS;
@@ -424,8 +433,8 @@ int32_t stftDenoise_denoise_scalar(stftDenoiseHandle *handle,
 	memcpy(handle->inbuf, handle->inbuf + half_win_size, sizeof(float) * half_win_size);
 	memcpy(handle->inbuf + half_win_size, in, sizeof(float) * half_win_size);
 
-	// do STFT
-	stftDenoise_STFT(handle);
+	// do audio
+	audioDenoise_audio(handle);
 
 	(handle->have_nblk_time)++;
 
@@ -434,10 +443,10 @@ int32_t stftDenoise_denoise_scalar(stftDenoiseHandle *handle,
 	}
 
 	// block thresholding
-	stftDenoise_core(handle);
+	audioDenoise_core(handle);
 
-	// do inverse STFT
-	stftDenoise_inverse_STFT(handle);
+	// do inverse audio
+	audioDenoise_inverse_audio(handle);
 
 	handle->have_nblk_time = 0;
 
@@ -445,7 +454,7 @@ int32_t stftDenoise_denoise_scalar(stftDenoiseHandle *handle,
 }
 
 
-int32_t stftDenoise_output_scalar(stftDenoiseHandle *handle,
+int32_t audioDenoise_output_scalar(audioDenoiseHandle *handle,
 	float *out, int32_t out_len) {
 	if (out_len < handle->macro_size) {
 		return 0;
@@ -457,7 +466,7 @@ int32_t stftDenoise_output_scalar(stftDenoiseHandle *handle,
 }
 
 
-int32_t stftDenoise_flush_scalar(stftDenoiseHandle *handle,
+int32_t audioDenoise_flush_scalar(audioDenoiseHandle *handle,
 	float *out, int32_t out_len) {
 	int32_t half_win_size = handle->half_win_size;
 	int32_t out_size = (handle->have_nblk_time) * half_win_size;
@@ -473,7 +482,7 @@ int32_t stftDenoise_flush_scalar(stftDenoiseHandle *handle,
 		sizeof(float) * (handle->macro_size));
 
 	for (int32_t i = 0; i < handle->have_nblk_time; i++) {
-		fft_plan backward_plan = fft_plan_dft_c2r_1d(handle->win_size, handle->stft_coef[i], handle->inbuf_win, 0);
+		fft_plan backward_plan = fft_plan_dft_c2r_1d(handle->win_size, handle->audio_coef[i], handle->inbuf_win, 0);
 		fft_execute(backward_plan);
 		fft_destroy_plan(backward_plan);
 		float inv_winsize = 1.0f / (handle->win_size);
@@ -487,7 +496,7 @@ int32_t stftDenoise_flush_scalar(stftDenoiseHandle *handle,
 	return out_size;
 }
 
-void stftDenoise_free(stftDenoiseHandle *handle) {
+void audioDenoise_free(audioDenoiseHandle *handle) {
 	if (handle) {
 		if (handle->win_hanning)
 			free(handle->win_hanning);
@@ -505,43 +514,43 @@ void stftDenoise_free(stftDenoiseHandle *handle) {
 		if (handle->inbuf_win)
 			free(handle->inbuf_win);
 
-		if (handle->stft_coef) {
+		if (handle->audio_coef) {
 			for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-				if (handle->stft_coef[i])
-					free(handle->stft_coef[i]);
+				if (handle->audio_coef[i])
+					free(handle->audio_coef[i]);
 			}
-			free(handle->stft_coef);
+			free(handle->audio_coef);
 		}
-		if (handle->stft_thre) {
+		if (handle->audio_thre) {
 			for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-				if (handle->stft_thre[i])
-					free(handle->stft_thre[i]);
+				if (handle->audio_thre[i])
+					free(handle->audio_thre[i]);
 			}
-			free(handle->stft_thre);
+			free(handle->audio_thre);
 		}
-		if (handle->stft_coef_block) {
+		if (handle->audio_coef_block) {
 			for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-				if (handle->stft_coef_block[i])
-					free(handle->stft_coef_block[i]);
+				if (handle->audio_coef_block[i])
+					free(handle->audio_coef_block[i]);
 			}
-			free(handle->stft_coef_block);
+			free(handle->audio_coef_block);
 		}
-		if (handle->stft_coef_block_norm) {
+		if (handle->audio_coef_block_norm) {
 			for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-				if (handle->stft_coef_block_norm[i])
-					free(handle->stft_coef_block_norm[i]);
+				if (handle->audio_coef_block_norm[i])
+					free(handle->audio_coef_block_norm[i]);
 			}
-			free(handle->stft_coef_block_norm);
+			free(handle->audio_coef_block_norm);
 		}
 		free(handle);
 	}
 }
 
-int32_t stftDenoise_max_output(const stftDenoiseHandle *handle) {
+int32_t audioDenoise_max_output(const audioDenoiseHandle *handle) {
 	return handle->macro_size;
 }
 
-int32_t stftDenoise_samples_per_time(const stftDenoiseHandle *handle) {
+int32_t audioDenoise_samples_per_time(const audioDenoiseHandle *handle) {
 	return handle->half_win_size;
 }
 

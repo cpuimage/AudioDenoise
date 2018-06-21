@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "timing.h"
-#include "stftDenoise.h"
+#include "audioDenoise.h"
 
 #ifdef _WIN32
 
@@ -105,38 +105,38 @@ void splitpath(const char *path, char *drv, char *dir, char *name, char *ext) {
 
 int DenoiseProc(float *buffer, int sampleRate, size_t SampleCount, int32_t time_win, float sigma_noise) {
     int32_t ret = -1;
-    stftDenoiseHandle *denoise_handle = NULL;
-    denoise_handle = stftDenoise_init(time_win, sampleRate, &ret, sigma_noise);
+    audioDenoiseHandle *denoise_handle = NULL;
+    denoise_handle = audioDenoise_init(time_win, sampleRate, &ret, sigma_noise);
     if (ret != OK || denoise_handle == NULL) {
-        printf("stftDenoise_init fail.\n");
+        printf("audioDenoise_init fail.\n");
         return -1;
     }
-    int32_t samples = stftDenoise_samples_per_time(denoise_handle);
-    int32_t outbuf_len = stftDenoise_max_output(denoise_handle);
+    int32_t samples = audioDenoise_samples_per_time(denoise_handle);
+    int32_t outbuf_len = audioDenoise_max_output(denoise_handle);
 
     float *input = buffer;
     float *output = buffer;
     size_t nTotal = SampleCount / samples;
 	size_t i = 0;
     for (i = 0; i < nTotal; i++) {
-        ret = stftDenoise_denoise_scalar(denoise_handle, input, samples);
+        ret = audioDenoise_denoise_scalar(denoise_handle, input, samples);
         if (ret == ERROR_PARAMS) {
             break;
         } else if (ret == NEED_MORE_SAMPLES) {
             input += samples;
             continue;
         } else if (ret == CAN_OUTPUT) {
-            int32_t len = stftDenoise_output_scalar(denoise_handle, output, outbuf_len);
+            int32_t len = audioDenoise_output_scalar(denoise_handle, output, outbuf_len);
             output += len;
         }
         input += samples;
     }
-    stftDenoise_free(denoise_handle);
+    audioDenoise_free(denoise_handle);
 
     return 0;
 }
 
-void Stft_deNoise(char *in_file, char *out_file) {
+void audio_deNoise(char *in_file, char *out_file) {
     uint32_t sampleRate = 0; 
     uint64_t inSampleCount = 0;
     float *inBuffer = wavRead_scalar(in_file, &sampleRate, &inSampleCount);
@@ -166,7 +166,7 @@ int main(int argc, char *argv[]) {
     char out_file[1024];
     splitpath(in_file, drive, dir, fname, ext);
     sprintf(out_file, "%s%s%s_out%s", drive, dir, fname, ext);
-    Stft_deNoise(in_file, out_file);
+    audio_deNoise(in_file, out_file);
 
     printf("press any key to exit.\n");
     getchar();
