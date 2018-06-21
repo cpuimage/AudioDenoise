@@ -47,111 +47,115 @@ int roundup_pow_of_two(int x) {
 }
 
 stftDenoiseHandle *stftDenoise_init(int32_t time_win, int32_t fs, int32_t *err, float sigma_noise) {
-	if (time_win <= 0 || fs <= 0) {
-		*err = ERROR_PARAMS;
-		return nullptr;
-	}
+    if (time_win <= 0 || fs <= 0) {
+        *err = ERROR_PARAMS;
+        return nullptr;
+    }
+    int isMemFailed = 0;
+    stftDenoiseHandle *handle = (stftDenoiseHandle *) malloc(sizeof(struct StftDenoiseHandle));
+    if (handle == nullptr) return nullptr;
+    // Compute hanning window
+    handle->win_size = roundup_pow_of_two(fs / 1000 * time_win);
+    handle->half_win_size = handle->win_size / 2;
+    handle->win_hanning = (float *) malloc(sizeof(float) * (handle->win_size));
+    if (!(handle->win_hanning)) {
+        isMemFailed = 1;
+    }
+    make_hanning_window(handle->win_hanning, handle->win_size);
 
-	stftDenoiseHandle *handle = (stftDenoiseHandle *)malloc(sizeof(struct StftDenoiseHandle));
-	if (handle == nullptr) return nullptr;
-	// Compute hanning window
-	handle->win_size = roundup_pow_of_two(fs / 1000 * time_win);
-	handle->half_win_size = handle->win_size / 2;
-	handle->win_hanning = (float *)malloc(sizeof(float) * (handle->win_size));
-	if (!(handle->win_hanning)) {
-		goto end;
-	}
-	make_hanning_window(handle->win_hanning, handle->win_size);
+    //Compute block params
+    handle->max_nblk_time = 8;
+    handle->max_nblk_freq = 16;
+    handle->nblk_time = 3;
+    handle->nblk_freq = 5;
+    handle->sigma_noise = sigma_noise;
+    handle->sigma_hanning_noise = handle->sigma_noise * sqrtf(0.375f);
+    handle->macro_size = handle->half_win_size * handle->max_nblk_time;
+    handle->have_nblk_time = 0;
 
-	//Compute block params
-	handle->max_nblk_time = 8;
-	handle->max_nblk_freq = 16;
-	handle->nblk_time = 3;
-	handle->nblk_freq = 5;
-	handle->sigma_noise = sigma_noise;
-	handle->sigma_hanning_noise = handle->sigma_noise * sqrtf(0.375f);
-	handle->macro_size = handle->half_win_size * handle->max_nblk_time;
-	handle->have_nblk_time = 0;
+    handle->SURE_matrix = (float **) malloc(sizeof(float *) * (handle->nblk_time));
+    if (!(handle->SURE_matrix)) {
+        isMemFailed = 1;
+    }
+    for (int32_t i = 0; i < handle->nblk_time; i++) {
+        handle->SURE_matrix[i] = (float *) malloc(sizeof(float) * (handle->nblk_freq));
+        if (!(handle->SURE_matrix[i])) {
+            isMemFailed = 1;
+            break;
+        }
+        memset(handle->SURE_matrix[i], 0, sizeof(float) * (handle->nblk_freq));
+    }
 
-	handle->SURE_matrix = (float **)malloc(sizeof(float *) * (handle->nblk_time));
-	if (!(handle->SURE_matrix)) {
-		goto end;
-	}
-	for (int32_t i = 0; i < handle->nblk_time; i++) {
-		handle->SURE_matrix[i] = (float *)malloc(sizeof(float) * (handle->nblk_freq));
-		if (!(handle->SURE_matrix[i])) {
-			goto end;
-		}
-		memset(handle->SURE_matrix[i], 0, sizeof(float) * (handle->nblk_freq));
-	}
+    handle->inbuf = (float *) malloc(sizeof(float) * handle->win_size);
+    if (!(handle->inbuf)) {
+        isMemFailed = 1;
+    }
+    memset(handle->inbuf, 0, sizeof(float) * (handle->win_size));
+    handle->inbuf_win = (float *) malloc(sizeof(float) * handle->win_size);
+    if (!(handle->inbuf_win)) {
+        isMemFailed = 1;
+    }
+    memset(handle->inbuf_win, 0, sizeof(float) * (handle->win_size));
 
-	handle->inbuf = (float *)malloc(sizeof(float) * handle->win_size);
-	if (!(handle->inbuf)) {
-		goto end;
-	}
-	memset(handle->inbuf, 0, sizeof(float) * (handle->win_size));
-	handle->inbuf_win = (float *)malloc(sizeof(float) * handle->win_size);
-	if (!(handle->inbuf_win)) {
-		goto end;
-	}
-	memset(handle->inbuf_win, 0, sizeof(float) * (handle->win_size));
+    handle->outbuf = (float *) malloc(sizeof(float) * (handle->macro_size + handle->half_win_size));
+    if (!(handle->outbuf)) {
+        isMemFailed = 1;
+    }
+    memset(handle->outbuf, 0, sizeof(float) * (handle->macro_size + handle->half_win_size));
 
-	handle->outbuf = (float *)malloc(sizeof(float) * (handle->macro_size + handle->half_win_size));
-	if (!(handle->outbuf)) {
-		goto end;
-	}
-	memset(handle->outbuf, 0, sizeof(float) * (handle->macro_size + handle->half_win_size));
+    handle->stft_coef = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->stft_coef)) {
+        isMemFailed = 1;
+    }
+    for (int32_t i = 0; i < handle->max_nblk_time; i++) {
+        handle->stft_coef[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
+        if (!(handle->stft_coef[i])) {
+            isMemFailed = 1;
+            break;
+        }
+    }
+    handle->stft_thre = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->stft_thre)) {
+        isMemFailed = 1;
+    }
+    for (int32_t i = 0; i < handle->max_nblk_time; i++) {
+        handle->stft_thre[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
+        if (!(handle->stft_thre[i])) {
+            isMemFailed = 1;
+            break;
+        }
+    }
+    handle->stft_coef_block = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->stft_coef_block)) {
+        isMemFailed = 1;
+    }
+    for (int32_t i = 0; i < handle->max_nblk_time; i++) {
+        handle->stft_coef_block[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
+        if (!(handle->stft_coef_block[i])) {
+            isMemFailed = 1;
+            break;
+        }
+    }
+    handle->stft_coef_block_norm = (fft_complex **) malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
+    if (!(handle->stft_coef_block_norm)) {
+        isMemFailed = 1;
+    }
+    for (int32_t i = 0; i < handle->max_nblk_time; i++) {
+        handle->stft_coef_block_norm[i] = (fft_complex *) malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
+        if (!(handle->stft_coef_block_norm[i])) {
+            isMemFailed = 1;
+            break;
+        }
+    }
+    if (isMemFailed == 0) {
+        *err = OK;
+        return handle;
+    }
 
-	handle->stft_coef = (fft_complex **)malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-	if (!(handle->stft_coef)) {
-		goto end;
-	}
-	for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-		handle->stft_coef[i] = (fft_complex *)malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
-		if (!(handle->stft_coef[i])) {
-			goto end;
-		}
-	}
-	handle->stft_thre = (fft_complex **)malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-	if (!(handle->stft_thre)) {
-		goto end;
-	}
-	for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-		handle->stft_thre[i] = (fft_complex *)malloc(sizeof(fft_complex) * (handle->win_size / 2 + 1));
-		if (!(handle->stft_thre[i])) {
-			goto end;
-		}
-	}
-	handle->stft_coef_block = (fft_complex **)malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-	if (!(handle->stft_coef_block)) {
-		goto end;
-	}
-	for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-		handle->stft_coef_block[i] = (fft_complex *)malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
-		if (!(handle->stft_coef_block[i])) {
-			goto end;
-		}
-	}
-	handle->stft_coef_block_norm = (fft_complex **)malloc(sizeof(fft_complex *) * (handle->max_nblk_time));
-	if (!(handle->stft_coef_block_norm)) {
-		goto end;
-	}
-	for (int32_t i = 0; i < handle->max_nblk_time; i++) {
-		handle->stft_coef_block_norm[i] = (fft_complex *)malloc(sizeof(fft_complex) * (handle->max_nblk_freq));
-		if (!(handle->stft_coef_block_norm[i])) {
-			goto end;
-		}
-	}
-
-	*err = OK;
-	return handle;
-
-end:
-
-	stftDenoise_free(handle);
-	handle = nullptr;
-	*err = ERROR_MEMORY;
-	return handle;
+    stftDenoise_free(handle);
+    handle = nullptr;
+    *err = ERROR_MEMORY;
+    return handle;
 }
 
 int32_t stftDenoise_reset(stftDenoiseHandle *handle) {
