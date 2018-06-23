@@ -1,6 +1,9 @@
 //-----------------------------------------------------------------------------
 // This file represents the functions about FFT (Fast Fourier Transform)
 // FFTW: http://www.fftw.org/
+//-----------------------------------------------------------------------
+// The following functions are reffered by
+// http://www.kurims.kyoto-u.ac.jp/~ooura/index.html
 //-----------------------------------------------------------------------------
 #include "fft.h"
 
@@ -173,10 +176,6 @@ void fft_destroy_plan(fft_plan p) {
     if (p.w)
         free(p.w);
 }
-
-//-----------------------------------------------------------------------
-// The following functions are reffered by
-// http://www.kurims.kyoto-u.ac.jp/~ooura/index.html
 
 void cdft(int n, int isgn, float *a, int *ip, float *w) {
     void cftfsub(int n, float *a, int *ip, int nw, float *w);
